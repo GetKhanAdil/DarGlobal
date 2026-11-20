@@ -1,0 +1,14 @@
+# One-click deploy config for Render (https://render.com).
+# Push this repo to GitHub, then: Render Dashboard -> New -> Blueprint -> pick the repo.
+services:
+  - type: web
+    name: darglobal-wasalt-chatbot
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: OPENROUTER_API_KEY
+        sync: false   # set this in the Render dashboard (secret)
+      - key: OPENROUTER_MODEL
+        value: meta-llama/llama-3.3-70b-instruct:free
