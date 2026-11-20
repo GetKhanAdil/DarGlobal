@@ -1,0 +1,9 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+httpx==0.27.2
+rank-bm25==0.2.2
+pydantic==2.9.2
+python-dotenv==1.0.1
+# scraper only (not needed at runtime, but handy in the same image)
+requests==2.32.3
+beautifulsoup4==4.12.3

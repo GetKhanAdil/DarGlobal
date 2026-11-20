@@ -152,6 +152,26 @@ Response:
 
 ---
 
+## Troubleshooting: "The AI model is unavailable right now"
+
+This message means retrieval works but the OpenRouter call failed, so the app
+fell back to showing raw knowledge. Open **`/diag`** on your deployed URL
+(e.g. `https://your-app.onrender.com/diag`) — it shows the exact reason:
+
+| `/diag` shows | Cause | Fix |
+|---|---|---|
+| `api_key_present: false` | Key not set on the host | Add `OPENROUTER_API_KEY` in Render → Environment, then **Save, rebuild & deploy** |
+| `error: HTTP 401` | Wrong/expired key | Recopy the full key (`sk-or-v1-…`), no quotes/spaces |
+| `error: HTTP 429` | Free model rate-limited | Already handled — app tries several models; or add a tiny credit balance on OpenRouter |
+| `error: HTTP 404 … data policy / no endpoints` | Free `:free` models not enabled | At https://openrouter.ai/settings/privacy enable free/"may train on inputs" endpoints |
+
+The app now defaults to `openrouter/free` (OpenRouter's auto free-router) with
+fallbacks, so a single rate-limited model no longer breaks it. You can override
+the order with the `OPENROUTER_MODEL` env var (comma-separated slugs).
+
+> Most common first-deploy issue: the key wasn't added to Render **before** the
+> build, or OpenRouter's privacy setting blocks `:free` models. Fix both, redeploy.
+
 ## Notes & honest limitations
 
 - The knowledge base is a curated snapshot of **publicly available** marketing

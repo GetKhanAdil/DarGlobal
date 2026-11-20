@@ -10,10 +10,18 @@ import httpx
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# A free model on OpenRouter. Swap via env if this one is busy; other free
-# options: "deepseek/deepseek-chat-v3-0324:free",
-# "google/gemini-2.0-flash-exp:free", "qwen/qwen-2.5-72b-instruct:free".
-DEFAULT_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+# Free models on OpenRouter rotate often and single ":free" models can hit
+# upstream rate limits. We therefore try several in order and use the first
+# that responds. "openrouter/free" is OpenRouter's auto free-router, which
+# picks an available free model for you — the most resilient first choice.
+# Override with OPENROUTER_MODEL (single slug or comma-separated list).
+DEFAULT_MODELS = (
+    "openrouter/free,"
+    "openai/gpt-oss-120b:free,"
+    "meta-llama/llama-3.3-70b-instruct:free"
+)
+# Backwards-compatible alias (first model) for anything importing DEFAULT_MODEL.
+DEFAULT_MODEL = DEFAULT_MODELS.split(",")[0]
 
 SYSTEM_PROMPT = (
     "You are DarGlobal Assistant, a helpful real-estate assistant for DarGlobal "
@@ -43,12 +51,19 @@ def build_messages(question: str, context: str, history: list[dict] | None = Non
     return messages
 
 
+def _models_from_env() -> list[str]:
+    raw = os.getenv("OPENROUTER_MODEL", DEFAULT_MODELS)
+    return [m.strip() for m in raw.split(",") if m.strip()]
+
+
 def chat(question: str, context: str, history: list[dict] | None = None) -> str:
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
-        raise LLMError("OPENROUTER_API_KEY is not set.")
+        raise LLMError(
+            "OPENROUTER_API_KEY is not set. Add it in your host's environment "
+            "variables and redeploy."
+        )
 
-    model = os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -56,24 +71,33 @@ def chat(question: str, context: str, history: list[dict] | None = None) -> str:
         "HTTP-Referer": os.getenv("APP_URL", "http://localhost:8000"),
         "X-Title": "DarGlobal Wasalt Chatbot",
     }
-    payload = {
-        "model": model,
-        "messages": build_messages(question, context, history),
-        "temperature": 0.2,
-        "max_tokens": 600,
-    }
+    messages = build_messages(question, context, history)
 
-    try:
-        with httpx.Client(timeout=60) as client:
-            resp = client.post(OPENROUTER_URL, headers=headers, json=payload)
-    except httpx.HTTPError as e:
-        raise LLMError(f"Request to OpenRouter failed: {e}") from e
+    errors = []
+    for model in _models_from_env():
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.2,
+            "max_tokens": 600,
+        }
+        try:
+            with httpx.Client(timeout=60) as client:
+                resp = client.post(OPENROUTER_URL, headers=headers, json=payload)
+        except httpx.HTTPError as e:
+            errors.append(f"{model}: request failed ({e})")
+            continue
 
-    if resp.status_code != 200:
-        raise LLMError(f"OpenRouter returned {resp.status_code}: {resp.text[:300]}")
+        if resp.status_code != 200:
+            # 429 (rate limit) or 404 (model/data-policy) -> try the next model.
+            errors.append(f"{model}: HTTP {resp.status_code} {resp.text[:200]}")
+            continue
 
-    data = resp.json()
-    try:
-        return data["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError) as e:
-        raise LLMError(f"Unexpected OpenRouter response: {data}") from e
+        data = resp.json()
+        try:
+            return data["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError):
+            errors.append(f"{model}: unexpected response {str(data)[:200]}")
+            continue
+
+    raise LLMError("All models failed. " + " | ".join(errors))

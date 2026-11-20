@@ -7,12 +7,18 @@ plus the sources used.
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Load a local .env file if present (no-op in production where env vars are
+# set by the host, e.g. Render's Environment tab).
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .llm import LLMError, chat
+from .llm import DEFAULT_MODELS, LLMError, chat
 from .rag import kb
 
 app = FastAPI(title="DarGlobal + Wasalt Chatbot")
@@ -44,6 +50,31 @@ class ChatResponse(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok", "documents": len(kb.docs)}
+
+
+@app.get("/diag")
+def diag():
+    """Diagnostic: is the key present, and does a live LLM call work?
+
+    Open /diag in the browser. If 'llm_ok' is false, 'error' shows the exact
+    reason from OpenRouter (401 = bad/missing key, 429 = rate limited,
+    404 = model or data-policy issue -> enable free endpoints in OpenRouter
+    privacy settings).
+    """
+    key = os.getenv("OPENROUTER_API_KEY")
+    info = {
+        "api_key_present": bool(key),
+        "api_key_prefix": (key[:10] + "…") if key else None,
+        "models": os.getenv("OPENROUTER_MODEL", DEFAULT_MODELS),
+    }
+    try:
+        answer = chat("Say hello in one short sentence.", "DarGlobal is a developer.", [])
+        info["llm_ok"] = True
+        info["sample"] = answer[:160]
+    except LLMError as e:
+        info["llm_ok"] = False
+        info["error"] = str(e)[:800]
+    return info
 
 
 @app.post("/chat", response_model=ChatResponse)
