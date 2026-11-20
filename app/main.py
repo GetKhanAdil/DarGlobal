@@ -44,6 +44,24 @@ class ChatResponse(BaseModel):
 def health():
     return {"status": "ok", "documents": len(kb.docs)}
 
+@app.get("/diag")
+def diag():
+    key = os.getenv("OPENROUTER_API_KEY")
+    info = {
+        "api_key_present": bool(key),
+        "api_key_prefix": (key[:10] + "…") if key else None,
+        "model": os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free"),
+    }
+    try:
+        answer = chat("Say hello in one short sentence.", "DarGlobal is a developer.", [])
+        info["llm_ok"] = True
+        info["sample"] = answer[:160]
+    except Exception as e:
+        info["llm_ok"] = False
+        info["error"] = str(e)[:800]
+    return info
+
+
 
 @app.post("/chat", response_model=ChatResponse)
 def chat_endpoint(req: ChatRequest):
